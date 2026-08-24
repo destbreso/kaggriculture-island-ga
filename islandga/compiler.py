@@ -39,7 +39,21 @@ def quad_tiles(q):
                                         t))
 
 
-def compile_spec(g):
+def compile_spec(g, profile="reference"):
+    """Compile a genome. `profile` declares which REPAIR LAYER the
+    executor provides, because structural-purchase emission must match it:
+
+    * "reference": the bundled executor (animal ledger valve). Animal
+      waves re-emit on a ladder (d, +2, +4, +7, +10) and the valve makes
+      re-emission safe; a briefly-poor farm keeps its herd.
+    * "makeup": an executor that RETRIES structural purchases itself
+      (windowed land re-issue, per-species animal makeup). Animal waves
+      emit ONCE; a ladder under such an executor would double-buy.
+
+    Land re-emits on a short ladder under both profiles; note the known
+    softness this buys: an executor without a land gate can clear a
+    later re-emission early, so unlock genes are intentions, not exact
+    days, and the search optimises what actually happens."""
     unlock = {"NW": 0, "NE": int(g["ne"]), "SW": int(g["sw"]),
               "SE": int(g["se"]) if g.get("se") else 99}
 
@@ -146,20 +160,34 @@ def compile_spec(g):
             want = max(want, 2)
         hires[d] = want
 
-    # ---- 3) production projector: cumulative sellable-by-morning
-    cum = {}
+    # ---- 3) production projector: cumulative sellable-by-morning.
+    # Built as per-day arrivals first, then prefix-summed: crops arrive
+    # per harvest event (ongoing crops STEP at their interval, matching
+    # the engine's yield_units, not a smoothed drip).
+    prod = {d: {} for d in range(31)}
+
+    def add(day, good, units):
+        if day <= 30:
+            prod[max(0, day)][good] = \
+                prod[max(0, day)].get(good, 0.0) + units
+
     for x, y, crop, days in plant_days:
         c = CROPS[crop]
-        m = c["max_yield_day"]
-        arr = cum.setdefault(crop, [0.0] * 31)
         if not c["ongoing"]:
-            for p in days:                  # each harvest is a lump
-                for d in range(p + m + 1, 31):
-                    arr[d] += c["max_yield"] * EFF
+            for p in days:
+                add(p + c["max_yield_day"] + 1, crop,
+                    c["max_yield"] * EFF)
         else:
-            p, fyd = days[0], c["first_yield_day"]
-            for d in range(p + fyd + 1, 31):    # a drip after first yield
-                arr[d] += EFF * (d - p - fyd) / max(1, c["interval"])
+            p = days[0]
+            for d in range(p + c["first_yield_day"], 30, c["interval"]):
+                add(d + 1, crop, 1 * EFF)
+
+    cum = {}
+    for d in range(31):
+        for good, u in prod.get(d, {}).items():
+            arr = cum.setdefault(good, [0.0] * 31)
+            for k in range(d, 31):
+                arr[k] += u
 
     herd_by_day = [0] * 31
     for day0, kind, n in waves:
@@ -235,12 +263,11 @@ def compile_spec(g):
                 push(t1, ["BUY_SEED", crop, n + 1])
         if herd_by_day[d] > 0 and d < 28:
             push(t1, ["BUY_PRODUCT", "WHEAT", herd_by_day[d]])
-        # structural purchases re-emit on a short ladder; the executor's
-        # ledger valve makes re-emission safe (no double-buys), and the
-        # ladder is what keeps a briefly-poor farm from losing them
+        # structural purchases: emission profile per the docstring
+        animal_days = ((0, 2, 4, 7, 10) if profile == "reference"
+                       else (0,))
         for day0, kind, n in waves:
-            if d in (day0, day0 + 2, day0 + 4, day0 + 7, day0 + 10) \
-                    and d <= 29:
+            if any(d == day0 + k for k in animal_days) and d <= 29:
                 push(t1, ["BUY_ANIMAL", kind, n])
         for i, q in enumerate(("NE", "SW", "SE")):
             if unlock[q] <= 29 and d in (unlock[q], unlock[q] + 2,

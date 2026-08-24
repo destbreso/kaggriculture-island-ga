@@ -51,7 +51,16 @@ class SearchConfig:
         return cfg
 
 
-def run_search(cfg: SearchConfig, out_dir):
+def run_search(cfg: SearchConfig, out_dir, compiler=None,
+               pool_factory=None, eval_stream=None):
+    """The orchestration is executor-agnostic: inject `compiler`
+    (genome -> blueprint), `pool_factory` (procs -> worker pool) and
+    `eval_stream` (pool, tasks -> (gid, seed, bank) iterator) to run
+    the same search over a different executor. Defaults use the
+    bundled reference executor."""
+    compiler = compiler or compile_spec
+    pool_factory = pool_factory or make_pool
+    eval_stream = eval_stream or eval_many
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(cfg.rng_seed)
@@ -71,7 +80,7 @@ def run_search(cfg: SearchConfig, out_dir):
     genomes = {}
     top_pool = Pool(cfg.pool_file, cfg.pool_size) if cfg.pool_file else None
     log_f = open(out / "log.jsonl", "a")
-    pool = make_pool(cfg.procs or None)
+    pool = pool_factory(cfg.procs or None)
     t_start = time.time()
     t_end = t_start + cfg.hours * 3600
     gen, games = 0, 0
@@ -93,14 +102,14 @@ def run_search(cfg: SearchConfig, out_dir):
                     gid = gid_of(g)
                     genomes[gid] = g
                     if fitness(gid) is None:
-                        bp_json = json.dumps(compile_spec(copy.deepcopy(g)))
+                        bp_json = json.dumps(compiler(copy.deepcopy(g)))
                         for s in cfg.seeds:
                             if s not in cache.get(gid, {}):
                                 tasks.append((gid, bp_json, s))
             t0 = time.time()
             gid_isl = {gid_of(g): ii for ii, pop in enumerate(islands)
                        for g in pop}
-            for gid, seed, bank in eval_many(pool, tasks):
+            for gid, seed, bank in eval_stream(pool, tasks):
                 cache.setdefault(gid, {})[seed] = bank
                 games += 1
                 log_f.write(json.dumps(
@@ -220,9 +229,9 @@ def run_search(cfg: SearchConfig, out_dir):
         metrics = None
         if best_ever[0] is not None:
             g = best_ever[0]
-            bp_json = json.dumps(compile_spec(copy.deepcopy(g)))
+            bp_json = json.dumps(compiler(copy.deepcopy(g)))
             conf = {}
-            for gid, seed, bank in eval_many(
+            for gid, seed, bank in eval_stream(
                     pool, [(gid_of(g), bp_json, s)
                            for s in cfg.confirm_seeds]):
                 conf[seed] = bank

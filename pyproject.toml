@@ -1,0 +1,13 @@
+[project]
+name = "islandga"
+version = "0.1.0"
+description = "Island GA schedule search for Kaggle's Kaggriculture competition"
+requires-python = ">=3.9"
+dependencies = ["kaggle-environments>=1.32"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["islandga"]
