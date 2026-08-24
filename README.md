@@ -114,6 +114,37 @@ Everything is a parameter. Copy `config.example.json` and pass it with
 | `rng_seed` | 20260824 | reproducibility of the search itself |
 | `pool_file` | results/pool.json | the rotating top-N snapshot pool |
 | `pool_size` | 10 | how many genomes the pool keeps |
+| `islands` | 0 | island count; 0 = one per species, more cycles the list |
+| `stagnation_gens` | 10 | island restart after N generations without improving |
+| `global_stagnation_gens` | 18 | archipelago restart after M flat generations |
+| `immigrant_every` | 4 | a fresh random genome replaces each island's worst |
+
+## Escaping local optima
+
+Long runs die of premature convergence: every island ends up holding
+the same champion and generation after generation evaluates nothing new
+(a 144-generation run of mine spent its last thirty generations flat).
+Four mechanisms watch for it, all parameters above:
+
+* **stagnation counter per island**: improving means beating the
+  island's own best, not holding it (the elite always holds it);
+* **island cataclysm**: after `stagnation_gens` flat generations the
+  island keeps its elite and is reseeded around it with fresh species
+  draws plus hot mutants (3-6 moves); a still-stuck island repeats this
+  every N generations, which is intended: keep kicking;
+* **hypermutation**: a half-stagnant island mutates hotter (2-5 moves
+  instead of 1-3) before the cataclysm fires;
+* **archipelago restart**: when the GLOBAL best is flat for
+  `global_stagnation_gens`, only the island holding it survives and the
+  rest are reborn from their species;
+* plus **random immigrants** every `immigrant_every` generations as
+  constant background diversity.
+
+More islands: set `islands: 8` (the species list is cycled), or repeat
+names in `species`. And one honest warning for long runs: the
+winner's-curse gap grows with generations spent on a small screen
+panel, because the search learns the panel. Give a long run a bigger
+`seeds` list; the confirm panel will tell you if you did not.
 
 The genome's own bounds (quadrant unlock windows, hire plateau, crop
 tables) live in `islandga/genome.py` as `BOUNDS`, next to the four

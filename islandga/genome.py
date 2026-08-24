@@ -113,10 +113,11 @@ def make_species(name, rng):
 
 
 # ---------------------------------------------------------------- moves
-def mutate(genome, rng):
-    """1-3 macro-mutations; every move keeps the spec meaningful."""
+def mutate(genome, rng, moves=(1, 3)):
+    """Macro-mutations (count drawn from `moves`); every move keeps the
+    spec meaningful. Stagnant islands pass a hotter range (hypermutation)."""
     g = copy.deepcopy(genome)
-    for _ in range(rng.randint(1, 3)):
+    for _ in range(rng.randint(*moves)):
         m = rng.randrange(7)
         if m == 0:
             k = rng.choice(["ne", "sw", "se"])

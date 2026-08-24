@@ -40,6 +40,10 @@ class SearchConfig:
     rng_seed: int = 20260824
     pool_file: str = "results/pool.json"
     pool_size: int = 10
+    islands: int = 0                   # 0 = one per species; more cycles them
+    stagnation_gens: int = 10          # island restart after N flat gens
+    global_stagnation_gens: int = 18   # archipelago restart after M flat gens
+    immigrant_every: int = 4           # fresh random genome cadence, 0 = off
 
     @classmethod
     def load(cls, path):
@@ -51,11 +55,17 @@ def run_search(cfg: SearchConfig, out_dir):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(cfg.rng_seed)
+    names = list(cfg.species)
+    n_isl = cfg.islands or len(names)
+    isl_species = [names[i % len(names)] for i in range(n_isl)]
     islands = []
-    for name in cfg.species:
+    for name in isl_species:
         base = make_species(name, rng)
         islands.append([base] + [mutate(base, rng)
                                  for _ in range(cfg.pop - 1)])
+    isl_stall = [0] * n_isl            # gens since the island last improved
+    isl_prev = [float("-inf")] * n_isl
+    global_stall, prev_global, restarts = 0, float("-inf"), 0
 
     cache = {}                         # gid -> {seed: bank}
     genomes = {}
@@ -108,12 +118,41 @@ def run_search(cfg: SearchConfig, out_dir):
                                            origin=f"{out.name}:g{gen}")
 
             new_islands = []
-            for pop in islands:
+            for ii, pop in enumerate(islands):
                 scored = sorted(pop,
                                 key=lambda g: -(fitness(gid_of(g)) or 0))
                 fbest = fitness(gid_of(scored[0])) or 0
                 if fbest > best_ever[1]:
                     best_ever = (scored[0], fbest)
+                # stagnation bookkeeping: improvement means beating the
+                # island's own best, not merely holding it (the elite
+                # always holds it)
+                if fbest > isl_prev[ii] + 1:
+                    isl_stall[ii] = 0
+                else:
+                    isl_stall[ii] += 1
+                isl_prev[ii] = max(isl_prev[ii], fbest)
+                if isl_stall[ii] >= cfg.stagnation_gens:
+                    # CATACLYSM: keep the elite, reseed the island around
+                    # it with fresh species draws and hot mutants of the
+                    # elite. A stuck island repeats this every N flat gens,
+                    # which is the intended behaviour: keep kicking.
+                    elite = scored[0]
+                    n_fresh = max(1, len(pop) // 3)
+                    fresh = [make_species(isl_species[ii], rng)
+                             for _ in range(n_fresh)]
+                    hot = [mutate(elite, rng, moves=(3, 6))
+                           for _ in range(len(pop) - 1 - n_fresh)]
+                    new_islands.append([elite] + fresh + hot)
+                    isl_stall[ii] = 0
+                    restarts += 1
+                    print(f"  island {ii} ({isl_species[ii]}) RESTARTED: "
+                          f"flat {cfg.stagnation_gens} gens at "
+                          f"{fbest:,.0f}", flush=True)
+                    continue
+                # hypermutation: a half-stagnant island mutates hotter
+                hot_moves = (2, 5) if isl_stall[ii] >= \
+                    max(2, cfg.stagnation_gens // 2) else (1, 3)
                 nxt = [scored[0]]      # elitism
                 while len(nxt) < len(pop):
                     def pick():
@@ -124,7 +163,11 @@ def run_search(cfg: SearchConfig, out_dir):
                     child = crossover(a, b, rng) \
                         if rng.random() < cfg.crossover_p \
                         else copy.deepcopy(a)
-                    nxt.append(mutate(child, rng))
+                    nxt.append(mutate(child, rng, moves=hot_moves))
+                # random immigrants: constant cheap diversity
+                if cfg.immigrant_every and gen % cfg.immigrant_every == 0 \
+                        and len(nxt) > 2:
+                    nxt[-1] = make_species("random", rng)
                 new_islands.append(nxt)
             islands = new_islands
             if gen == 1:
@@ -137,10 +180,36 @@ def run_search(cfg: SearchConfig, out_dir):
                     pop.sort(key=lambda g: -(fitness(gid_of(g)) or 0))
                     pop[-1] = donor
 
+            # archipelago-level escape: when the GLOBAL best has been flat
+            # for long enough, only the island holding it survives and the
+            # rest are reborn from their species
+            if best_ever[1] > prev_global + 1:
+                global_stall = 0
+            else:
+                global_stall += 1
+            prev_global = max(prev_global, best_ever[1])
+            if global_stall >= cfg.global_stagnation_gens:
+                keep = max(range(len(islands)), key=lambda i: max(
+                    (fitness(gid_of(g)) or 0) for g in islands[i]))
+                for i in range(len(islands)):
+                    if i == keep:
+                        continue
+                    base = make_species(isl_species[i], rng)
+                    islands[i] = [base] + [mutate(base, rng)
+                                           for _ in range(cfg.pop - 1)]
+                    isl_stall[i] = 0
+                    isl_prev[i] = float("-inf")
+                global_stall = 0
+                restarts += 1
+                print(f"  ARCHIPELAGO RESTART: global best flat "
+                      f"{cfg.global_stagnation_gens} gens; island {keep} "
+                      f"kept, the rest reseeded", flush=True)
+
             fits = [round(max((fitness(gid_of(g)) or 0) for g in p))
                     for p in islands]
             print(f"gen {gen:3d}  islands {fits}  "
                   f"best {best_ever[1]:,.0f}  games {games:,}  "
+                  f"stall {global_stall}  "
                   f"{time.time()-t0:.0f}s/gen", flush=True)
             (out / "state.json").write_text(json.dumps(
                 {"gen": gen, "games": games,
@@ -175,13 +244,14 @@ def run_search(cfg: SearchConfig, out_dir):
                     for p in islands],
                 "pool_file": cfg.pool_file or None,
                 "pool_members": len(top_pool.members) if top_pool else 0,
+                "restarts": restarts,
             }
             (out / "best.json").write_text(json.dumps(metrics, indent=1))
             print("\n=== FINAL METRICS " + "=" * 44)
             for k in ("best_gid", "screen_mean", "confirm_mean",
                       "winners_curse_gap", "gen1_best",
                       "improvement_vs_gen1", "generations", "games",
-                      "wall_hours", "island_final_bests"):
+                      "wall_hours", "island_final_bests", "restarts"):
                 print(f"  {k:22s} {metrics[k]}")
             print(f"  written to {out}/best.json  (genome included)")
             print("  quote the CONFIRM mean, never the screen mean",
