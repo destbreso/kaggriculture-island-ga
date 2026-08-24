@@ -186,7 +186,7 @@ memory and the bound came out 3.7x too high:
 If this repo or the notebook feeds something you publish, a link to
 either is plenty:
 
-* code: `github.com/destbreso/kaggriculture-island-ga`
+* code: `github.com/destbreso/kaggliculture-island-ga`
 * reasoning: [Island GA | An owned schedule is a moat](https://www.kaggle.com/code/destbreso/island-ga-an-owned-schedule-is-a-moat)
 
 MIT licensed. Built by [destbreso](https://www.kaggle.com/destbreso)
