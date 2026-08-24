@@ -70,7 +70,34 @@ def bradley_terry(wins, names, iters=200):
     return s
 
 
-def run_arena(pool, seeds, procs, out_dir):
+def _swiss_rounds(names, rounds, played, strength):
+    """Adjacent-strength pairing, avoiding repeats where possible. This
+    is the SCHEDULE for big pools; the RANKING model stays Bradley-Terry
+    either way. (The competition's final phase pairs sparsely by its own
+    matchmaking and fits BT on the results; for a small pool a full
+    round-robin gives the same model strictly better data, so swiss is a
+    cost lever, not a fidelity lever.)"""
+    order = sorted(names, key=lambda n: -strength.get(n, 1.0))
+    pairs, used = [], set()
+    for a in order:
+        if a in used:
+            continue
+        pick = None
+        for b in order:
+            if b == a or b in used:
+                continue
+            if (a, b) not in played or pick is None:
+                pick = b
+                if (a, b) not in played:
+                    break
+        if pick is not None:
+            pairs.append((a, pick))
+            used.add(a)
+            used.add(pick)
+    return pairs
+
+
+def run_arena(pool, seeds, procs, out_dir, pairing="full", rounds=0):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     members = pool.members
@@ -80,19 +107,33 @@ def run_arena(pool, seeds, procs, out_dir):
     bps = {m["gid"]: json.dumps(compile_spec(json.loads(
         json.dumps(m["genome"])))) for m in members}
     names = [m["gid"] for m in members]
-    tasks = [(a, b, s, bps[a], bps[b])
-             for a, b in itertools.combinations(names, 2)
-             for s in seeds]
-    n_games = len(tasks) * 2
-    print(f"arena: {len(names)} members, {len(tasks)} pairings x 2 seats "
-          f"= {n_games} games on seeds {tuple(seeds)}")
+    if pairing == "full":
+        pair_list = list(itertools.combinations(names, 2))
+    else:                              # swiss: seeded by pool order, then
+        pair_list = None               # BT-guided rounds (built per round)
+        rounds = rounds or max(3, len(names).bit_length() + 1)
+    if pair_list is not None:
+        tasks = [(a, b, s, bps[a], bps[b]) for a, b in pair_list
+                 for s in seeds]
+        n_games = len(tasks) * 2
+        print(f"arena ({pairing}): {len(names)} members, "
+              f"{len(tasks)} pairings x 2 seats = {n_games} games "
+              f"on seeds {tuple(seeds)}")
+    else:
+        n_games = rounds * (len(names) // 2) * 2 * len(seeds)
+        print(f"arena (swiss, {rounds} rounds): {len(names)} members, "
+              f"~{n_games} games on seeds {tuple(seeds)}")
 
     wins, banks, played = {}, {n: [] for n in names}, 0
+    seen_pairs = set()
     mp_pool = make_pool(procs or None)
     rows = []
-    try:
+
+    def _play(task_list):
+        nonlocal played
         for ga, gb, seed, (a0, b0), (a1, b1) in \
-                mp_pool.imap_unordered(_worker_duel, tasks, chunksize=1):
+                mp_pool.imap_unordered(_worker_duel, task_list,
+                                       chunksize=1):
             for wa, wb, ba, bb in ((ga, gb, a0, b0), (ga, gb, a1, b1)):
                 if ba > bb:
                     wins[(wa, wb)] = wins.get((wa, wb), 0) + 1
@@ -104,10 +145,26 @@ def run_arena(pool, seeds, procs, out_dir):
                 banks[wa].append(ba)
                 banks[wb].append(bb)
             played += 2
+            seen_pairs.add((ga, gb))
+            seen_pairs.add((gb, ga))
             rows.append({"a": ga, "b": gb, "seed": seed,
                          "a_seat0": [a0, b0], "a_seat1": [a1, b1]})
             if played % 20 == 0:
                 print(f"  {played}/{n_games} games", flush=True)
+
+    try:
+        if pair_list is not None:
+            _play(tasks)
+        else:
+            strength = {n: 1.0 for n in names}
+            for r in range(rounds):
+                pairs = _swiss_rounds(names, rounds, seen_pairs, strength)
+                _play([(a, b, s, bps[a], bps[b])
+                       for a, b in pairs for s in seeds])
+                strength = bradley_terry(wins, names)
+                lead = max(strength, key=strength.get)
+                print(f"  swiss round {r + 1}/{rounds}: leader {lead} "
+                      f"({strength[lead]:.3f})", flush=True)
     finally:
         mp_pool.close()
         mp_pool.join()

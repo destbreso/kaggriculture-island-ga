@@ -89,7 +89,8 @@ def cmd_pool(args):
 def cmd_arena(args):
     p = Pool(args.pool)
     seeds = [int(s) for s in args.seeds.split(",")]
-    run_arena(p, seeds, args.procs, args.out)
+    run_arena(p, seeds, args.procs, args.out,
+              pairing=args.pairing, rounds=args.rounds)
     return 0
 
 
@@ -191,6 +192,12 @@ def main():
     p.add_argument("--seeds", default="11,23,47")
     p.add_argument("--procs", type=int, default=None)
     p.add_argument("--out", default="results/arena")
+    p.add_argument("--pairing", default="full", choices=["full", "swiss"],
+                   help="schedule only: the ranking model is Bradley-Terry"
+                        " either way (full = best data for small pools;"
+                        " swiss = O(N) rounds for big ones)")
+    p.add_argument("--rounds", type=int, default=0,
+                   help="swiss rounds (0 = auto ~log2(N)+2)")
 
     p = sub.add_parser("submit", help="package a genome as main.py and "
                                       "run the precheck battery")
