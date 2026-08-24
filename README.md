@@ -151,6 +151,53 @@ tables) live in `islandga/genome.py` as `BOUNDS`, next to the four
 species definitions. Editing a species IS the intended workflow: they
 are priors, not truths.
 
+## Use it as a library
+
+The CLI is a thin wrapper. `pip install -e .` and everything is
+importable, and `run_search` is EXECUTOR-AGNOSTIC: three injectable
+seams let you search over your own executor while keeping the whole
+orchestration (islands, escapes, pool rotation, the confirm
+discipline).
+
+```python
+import json
+from islandga.compiler import compile_spec
+from islandga.search import SearchConfig, run_search
+
+# the stock path, no CLI
+cfg = SearchConfig.load("config.example.json")
+cfg.hours = 2.0
+metrics = run_search(cfg, "results/lib_run")
+print(metrics["confirm_mean"])          # quote this one
+
+# your own executor: implement the three seams
+def my_compiler(genome):
+    # "makeup" if YOUR executor retries structural purchases itself,
+    # "reference" if it has valves like the bundled one (a re-emission
+    # ladder under a valve-less executor double-buys)
+    return compile_spec(genome, profile="makeup")
+
+class InlinePool:                       # simplest seam: no multiprocessing
+    def close(self): pass
+    def join(self): pass
+
+def my_eval_stream(pool, tasks):
+    for gid, bp_json, seed in tasks:    # (gid, blueprint-json, seed)
+        yield gid, seed, my_bank(json.loads(bp_json), seed)
+
+metrics = run_search(cfg, "results/my_executor_run",
+                     compiler=my_compiler,
+                     pool_factory=lambda procs: InlinePool(),
+                     eval_stream=my_eval_stream)
+```
+
+`my_bank` is the ~15-line harness in `islandga/evaluate.py`: build your
+agent from the blueprint, play one episode against an idle opponent at
+the given seed, return the final bank. The search neither knows nor
+cares which executor produced the number; that is what makes the
+package usable as a tool by a private research stack (it is exactly how
+I use it).
+
 ## What to improve first
 
 The reference executor is deliberately simple: greedy nearest-job
