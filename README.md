@@ -65,6 +65,36 @@ the winning genome, its screening mean, its mean on a DISJOINT confirm
 panel, and the gap between the two, which is the winner's curse made
 visible. Quote the confirm mean, never the screen mean.
 
+## From search to submission
+
+Searches feed a rotating top-N pool (shared across runs), the arena
+ranks the pool head to head, and submit packages any member as a
+single-file agent with a hard precheck battery:
+
+```bash
+# every search rotates its best genomes into the pool
+python cli.py search --hours 2 --pool results/pool.json --pool-size 10
+python cli.py pool                        # show the current top N
+
+# all-vs-all in the real engine: BOTH seat orientations per seed,
+# ranked by a Bradley-Terry fit on wins (the model the competition
+# itself uses for final standings). Bank-vs-idle selects FOR the pool;
+# the arena ranks WITHIN it, and the two disagree exactly when a
+# schedule is rich but fragile on a shared market.
+python cli.py arena --pool results/pool.json --seeds 11,23,47
+
+# package pool member #1 as a self-contained stdlib-only main.py and
+# precheck it: syntax, stdlib-only imports, a real smoke episode, a
+# SEAT-1 episode on the raw trimmed observation, worst-turn latency
+# against the 1 s budget, and determinism (same seed, same bank)
+python cli.py submit --pool results/pool.json --rank 1 --out submission
+```
+
+`submit` refuses to bless anything that fails a check, and prints the
+`kaggle competitions submit` line when everything passes. The seat-1
+check earns its place: seats above 0 see a trimmed observation in local
+replays, and an agent that assumes the full view dies there silently.
+
 ## Configuration
 
 Everything is a parameter. Copy `config.example.json` and pass it with
@@ -82,6 +112,8 @@ Everything is a parameter. Copy `config.example.json` and pass it with
 | `hours` | 1.0 | wall-clock budget |
 | `procs` | cpus-2 | parallel engine games |
 | `rng_seed` | 20260824 | reproducibility of the search itself |
+| `pool_file` | results/pool.json | the rotating top-N snapshot pool |
+| `pool_size` | 10 | how many genomes the pool keeps |
 
 The genome's own bounds (quadrant unlock windows, hire plateau, crop
 tables) live in `islandga/genome.py` as `BOUNDS`, next to the four

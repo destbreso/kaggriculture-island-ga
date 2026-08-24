@@ -23,6 +23,7 @@ from pathlib import Path
 from .compiler import compile_spec
 from .evaluate import eval_many, make_pool
 from .genome import crossover, gid_of, make_species, mutate
+from .pool import Pool
 
 
 @dataclass
@@ -37,6 +38,8 @@ class SearchConfig:
     hours: float = 1.0
     procs: int = 0                     # 0 = cpu count - 2
     rng_seed: int = 20260824
+    pool_file: str = "results/pool.json"
+    pool_size: int = 10
 
     @classmethod
     def load(cls, path):
@@ -56,6 +59,7 @@ def run_search(cfg: SearchConfig, out_dir):
 
     cache = {}                         # gid -> {seed: bank}
     genomes = {}
+    top_pool = Pool(cfg.pool_file, cfg.pool_size) if cfg.pool_file else None
     log_f = open(out / "log.jsonl", "a")
     pool = make_pool(cfg.procs or None)
     t_start = time.time()
@@ -93,6 +97,15 @@ def run_search(cfg: SearchConfig, out_dir):
                     {"gen": gen, "island": gid_isl.get(gid), "gid": gid,
                      "seed": seed, "bank": bank}) + "\n")
             log_f.flush()
+
+            # rotate the top-N snapshot pool with this generation's crop
+            if top_pool is not None:
+                for pop in islands:
+                    for g in pop:
+                        gid = gid_of(g)
+                        if fitness(gid) is not None:
+                            top_pool.offer(g, cache[gid],
+                                           origin=f"{out.name}:g{gen}")
 
             new_islands = []
             for pop in islands:
@@ -160,6 +173,8 @@ def run_search(cfg: SearchConfig, out_dir):
                 "island_final_bests": [
                     round(max((fitness(gid_of(g2)) or 0) for g2 in p))
                     for p in islands],
+                "pool_file": cfg.pool_file or None,
+                "pool_members": len(top_pool.members) if top_pool else 0,
             }
             (out / "best.json").write_text(json.dumps(metrics, indent=1))
             print("\n=== FINAL METRICS " + "=" * 44)
