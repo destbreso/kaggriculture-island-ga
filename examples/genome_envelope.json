@@ -1,0 +1,57 @@
+{
+ "ne": 6,
+ "sw": 10,
+ "se": null,
+ "plateau": 12,
+ "ramp_full": 8,
+ "tomato_day": 8,
+ "melon2": 1,
+ "sellpol": "hybrid",
+ "herd": [
+  [
+   0,
+   "COW",
+   2
+  ],
+  [
+   0,
+   "SHEEP",
+   2
+  ],
+  [
+   6,
+   "COW",
+   2
+  ],
+  [
+   8,
+   "SHEEP",
+   1
+  ],
+  [
+   10,
+   "COW",
+   1
+  ]
+ ],
+ "prog": {
+  "NW": {
+   "WHEAT": 8,
+   "CARROT": 3,
+   "STRAWBERRY": 4,
+   "MELON": 2
+  },
+  "NE": {
+   "WHEAT": 10,
+   "CARROT": 4,
+   "STRAWBERRY": 5,
+   "MELON": 6
+  },
+  "SW": {
+   "WHEAT": 12,
+   "CARROT": 5,
+   "MELON": 8
+  },
+  "SE": {}
+ }
+}
