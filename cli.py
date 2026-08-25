@@ -68,11 +68,14 @@ def cmd_search(args):
         cfg.pool_file = args.pool
     if args.pool_size is not None:
         cfg.pool_size = args.pool_size
+    if args.resume and not args.out:
+        raise SystemExit("--resume needs --out pointing at the run "
+                         "directory holding state.json")
     out = args.out or f"results/run_{int(time.time())}"
     print(f"island GA: {len(cfg.species)} islands x {cfg.pop}, "
           f"screen seeds {cfg.seeds}, {cfg.hours}h -> {out}  "
           f"(pool {cfg.pool_file or 'off'}, top {cfg.pool_size})")
-    run_search(cfg, out)
+    run_search(cfg, out, resume=args.resume)
     return 0
 
 
@@ -179,6 +182,11 @@ def main():
     p.add_argument("--pool", default=None,
                    help="top-N snapshot pool file (default results/pool.json)")
     p.add_argument("--pool-size", type=int, default=None)
+    p.add_argument("--resume", action="store_true",
+                   help="continue a killed run from --out/state.json "
+                        "(populations, counters and best restored; the "
+                        "CRN cache rebuilds itself on the first "
+                        "generation)")
 
     p = sub.add_parser("report", help="summarise a finished run")
     p.add_argument("--run", required=True)

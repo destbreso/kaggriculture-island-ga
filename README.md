@@ -43,9 +43,14 @@ python cli.py search --hours 1 --out results/run1
 
 # 4. the final metrics, plus a trajectory chart if matplotlib is around
 python cli.py report --run results/run1
+
+# a killed run (crash, reboot, ctrl-C) continues from its own checkpoint
+python cli.py search --hours 1 --out results/run1 --resume
 ```
 
 A search prints one line per generation and ends with a metrics block: the winning genome, its screening mean, its mean on a DISJOINT confirm panel, and the gap between the two, which is the winner's curse made visible. Quote the confirm mean, never the screen mean.
+
+`state.json` is written every generation, so a killed run loses at most one generation: `--resume` restores populations, counters and the best-so-far, and the first resumed generation re-evaluates the population, which rebuilds the fitness cache exactly because evaluation is CRN-seeded. Stagnation counters restart and the mutation RNG is reseeded from the resume point, so a resumed run is equivalent but not bit-identical to an uninterrupted one.
 
 ## From search to submission
 

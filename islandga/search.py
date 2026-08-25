@@ -52,12 +52,21 @@ class SearchConfig:
 
 
 def run_search(cfg: SearchConfig, out_dir, compiler=None,
-               pool_factory=None, eval_stream=None):
+               pool_factory=None, eval_stream=None, resume=False):
     """The orchestration is executor-agnostic: inject `compiler`
     (genome -> blueprint), `pool_factory` (procs -> worker pool) and
     `eval_stream` (pool, tasks -> (gid, seed, bank) iterator) to run
     the same search over a different executor. Defaults use the
-    bundled reference executor."""
+    bundled reference executor.
+
+    resume=True continues a killed run from out_dir/state.json (written
+    every generation): populations, generation and game counters and the
+    best-so-far are restored; the first resumed generation re-evaluates
+    the population, which reproduces the lost fitness cache exactly
+    because evaluation is CRN-seeded. Stagnation counters restart at
+    zero and the mutation RNG is reseeded from (rng_seed, gen), so a
+    resumed run is equivalent but not bit-identical to an uninterrupted
+    one."""
     compiler = compiler or compile_spec
     pool_factory = pool_factory or make_pool
     eval_stream = eval_stream or eval_many
@@ -86,6 +95,31 @@ def run_search(cfg: SearchConfig, out_dir, compiler=None,
     gen, games = 0, 0
     best_ever = (None, float("-inf"))
     gen1_best = None
+
+    if resume:
+        st_path = out / "state.json"
+        if not st_path.exists():
+            raise FileNotFoundError(
+                f"resume requested but {st_path} does not exist")
+        st = json.loads(st_path.read_text())
+        islands = st["islands"]
+        gen, games = st["gen"], st["games"]
+        best_g = st.get("best_genome")
+        if best_g is None:             # older checkpoints: recover by gid
+            best_g = next((g for pop in islands for g in pop
+                           if gid_of(g) == st.get("best_gid")), None)
+        if best_g is not None:
+            best_ever = (best_g, st["best_fit"])
+        gen1_best = st.get("gen1_best")
+        prev_global = st["best_fit"]
+        rng = random.Random(cfg.rng_seed * 1_000_003 + gen)
+        n_isl = len(islands)
+        isl_species = [names[i % len(names)] for i in range(n_isl)]
+        isl_stall = [0] * n_isl
+        isl_prev = [float("-inf")] * n_isl
+        print(f"RESUME from {st_path}: gen {gen}, games {games:,}, "
+              f"best {st.get('best_gid')} at {st['best_fit']:,.1f}",
+              flush=True)
 
     def fitness(gid):
         r = cache.get(gid, {})
@@ -223,7 +257,8 @@ def run_search(cfg: SearchConfig, out_dir, compiler=None,
             (out / "state.json").write_text(json.dumps(
                 {"gen": gen, "games": games,
                  "best_gid": gid_of(best_ever[0]) if best_ever[0] else None,
-                 "best_fit": best_ever[1], "islands": islands,
+                 "best_fit": best_ever[1], "best_genome": best_ever[0],
+                 "gen1_best": gen1_best, "islands": islands,
                  "config": asdict(cfg)}, default=str))
     finally:
         metrics = None
